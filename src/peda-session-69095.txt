@@ -1,3 +1,0 @@
-break ft_ping.c:59
-
-set exec-wrapper logging enabled
