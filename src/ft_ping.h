@@ -1,12 +1,17 @@
 #ifndef FT_PING_H
-#define FT_PING_H
+# define FT_PING_H
 
-#include <netinet/in.h>
-#include <icmp.h>
-#include <argp.h>
-#include <errno.h>
-#include <error.h>
-#include <sys/socket.h>
+# include <netinet/in.h>
+# include <argp.h>
+# include <sys/socket.h>
+# include <sys/time.h>
+# include <stddef.h>
+# include <errno.h>
+# include <error.h>
+# include <netinet/ip_icmp.h>
+# include <stdlib.h>
+
+# define TTL_ARG  1000
 
 typedef struct ping_infos
 {
