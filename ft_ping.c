@@ -173,11 +173,12 @@ void send_ping()
     printf("Avant memcopy\n");
     memcpy(buffer_to_send, &ping.ping_pckt, sizeof(ping.ping_pckt));
     printf("Dan sens ping\n");
-    if (sendto(ping.ping_fd, buffer_to_send, sizeof(ping.ping_pckt), 0, (struct sockaddr *)&ping.destination_address, sizeof(ping.destination_address)) < 0)
+    if (sendto(ping.ping_fd, buffer_to_send, sizeof(buffer_to_send), 0, (struct sockaddr *)&ping.destination_address, sizeof(ping.destination_address)) < 0)
     {
         fprintf(stderr, "Error with sendto : %s\n", strerror(errno));
         ping.packet_emitted--;
     }
+    printf("%s\n", buffer_to_send);
 }
 
 void receive_ping()

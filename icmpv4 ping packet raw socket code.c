@@ -358,7 +358,7 @@ int main(int argc,char *argv[])
      * value is returned by getsockopt(2).
      */
     /* Manipulating socket options.  */
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size) );
+    //setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size) );
     /*
      * SO_DONTROUTE
      * Don't send via a gateway, send only to directly connected
