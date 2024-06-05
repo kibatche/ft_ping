@@ -1,5 +1,6 @@
 /*
 This program has to be run in root. 
+This program creates a socket interface with protocol field set to "icmp". Now,  frame an ICMP header with packet type as "ICMP echo". This icmp header is attached to L3 packet in kernel network stack and now, the ICMP echo (ping) packets is sent to the destination host ip. On receiving ICMP echo packet, the destination host (if reachable) would send "ICMP reply" packet back to the source host. The below program on receiving ICMP reply would parse the ICMP header and validate whether the ICMP header is a valid "ICMP reply" header. The program runs in infinite while loop and this process goes on forever, until "Ctrl + c" is pressed.
 
 On pressing "ctrl + C", the program will invoke SIGINT signal handler code and print the statistics of the ping (i.e. no. of ICMP echo packets transmitted and the no. of ICMP reply packets received) and the program exits following this. 
 
@@ -358,7 +359,6 @@ int main(int argc,char *argv[])
      */
     /* Manipulating socket options.  */
     setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size) );
-    // setsockopt(sockfd, SOL_SOCKET, SO_DEBUG, &on, sizeof(on));
     /*
      * SO_DONTROUTE
      * Don't send via a gateway, send only to directly connected

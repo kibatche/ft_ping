@@ -3,6 +3,9 @@
         "errno.h": "c",
         "in.h": "c",
         "socket.h": "c",
-        "time.h": "c"
+        "time.h": "c",
+        "netdb.h": "c",
+        "stdlib.h": "c",
+        "error.h": "c"
     }
 }

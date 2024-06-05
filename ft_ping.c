@@ -2,7 +2,7 @@
 
 
 char *hostname;
-char packet_to_send[4096];
+char buffer_to_send[4096];
 char buffer_to_receive[4096];
 int verbose_opt;
 int quiet_opt;
@@ -86,34 +86,24 @@ int sig_handler(int sig)
 
 void init_ping(ping_infos *ping)
 {
-    
-    struct protoent *proto;
     /*hostent est une structure qui nous permettra
     de retrouver une adresse ip à partir d'un nom 
     de domaine*/
     struct hostent *host_entity = NULL;
     int fd;
 
-    host_entity = gethostbyname(hostname);
-    if (host_entity == NULL)
-    {
-        fprintf(stderr, "ping: unkown host\n");
-        free_arg(hostname);
-        exit(EXIT_FAILURE);
-    }
-    /*COnnaître le numéro du protocole (en l'occurrence toujours icmp)*/
-    proto = getprotobyname("icmp");
-    if (proto == NULL)
-    {
-        fprintf(stderr, "ping: protocol icmp unknown by getprotobyname\n");
-        free_arg(hostname);
-        exit(EXIT_FAILURE);
-    }
     /*création de la raw socket avec le protocole icmp*/
-    fd = socket(AF_INET, SOCK_RAW, proto->p_proto);
+    fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (fd == -1)
     {
         fprintf(stderr, "ping: %s\n", strerror(errno));
+        free_arg(hostname);
+        exit(EXIT_FAILURE);
+    }
+    host_entity = gethostbyname(hostname);
+    if (host_entity == NULL)
+    {
+        fprintf(stderr, "ping: unknown host\n");
         free_arg(hostname);
         exit(EXIT_FAILURE);
     }
@@ -177,12 +167,15 @@ unsigned short cal_chksum(unsigned short *addr, int len)
 
 void send_ping()
 {
-    ping.ping_pckt.un.echo.id++;
+    ping.ping_pckt.un.echo.sequence++;
     ping.packet_emitted++;
     ping.ping_pckt.checksum = cal_chksum((unsigned short *)&ping.ping_pckt, 64);
-    if (sendto(ping.ping_fd, &ping.ping_pckt,sizeof(ping.ping_pckt), 0, (struct sockaddr *)&ping.destination_address, sizeof(ping.destination_address)) < 0)
+    printf("Avant memcopy\n");
+    memcpy(buffer_to_send, &ping.ping_pckt, sizeof(ping.ping_pckt));
+    printf("Dan sens ping\n");
+    if (sendto(ping.ping_fd, buffer_to_send, sizeof(ping.ping_pckt), 0, (struct sockaddr *)&ping.destination_address, sizeof(ping.destination_address)) < 0)
     {
-        fprintf(stderr, "Error with sendto : %s", strerror(errno));
+        fprintf(stderr, "Error with sendto : %s\n", strerror(errno));
         ping.packet_emitted--;
     }
 }
@@ -191,14 +184,16 @@ void receive_ping()
 {
     while (ping.packet_received < ping.packet_emitted)
     {
-        ssize_t n = recvfrom(ping.ping_fd, buffer_to_receive, \
+        printf("Dans receive ping & fd  %d\n", ping.ping_fd);
+        int len_ping_addr = sizeof(ping.ping_address);
+        if (recvfrom(ping.ping_fd, buffer_to_receive, \
         sizeof(buffer_to_receive), 0, (struct sockaddr*)&ping.ping_address, \
-        (socklen_t *)sizeof(ping.ping_address));
-        if (n < 0)
+        (socklen_t *)&len_ping_addr) < 0)
         {
+            printf("PAS OK\n");
             if (errno = EINTR)
                 continue;
-            fprintf(stderr, "recvfrom error");
+            fprintf(stderr, "recvfrom error\n");
             continue;
         }
         printf("OK\n");
@@ -210,8 +205,8 @@ int main(int ac, char **av)
     init_args();
     argp_parse(&argp, ac, av, 0, 0, NULL);
     init_ping(&ping);
-    int size = 1024 * 5;
-    setsockopt(ping.ping_fd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
+    // int size = 1024 * 5;
+    // setsockopt(ping.ping_fd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
     send_ping();
     receive_ping();
     return 0;
