@@ -1,32 +1,30 @@
 #ifndef FT_PING_H
 # define FT_PING_H
 
+# include "macros.h"
+
 # include <netinet/in.h>
+# include <netinet/ip_icmp.h>
 # include <argp.h>
 # include <sys/socket.h>
 # include <sys/time.h>
 # include <stddef.h>
 # include <errno.h>
 # include <error.h>
-# include <netinet/ip_icmp.h>
 # include <stdlib.h>
-
-# define TTL_ARG  1000
+# include <netdb.h>
+# include <string.h>
 
 typedef struct ping_infos
 {
     int                 ping_fd;/*fd attribué à l'opération*/
-    uint16_t            ping_id;/*l'id attribué à un packet. Unsigned short.*/
-    int                 ping_type;/*icmp*/
-    size_t              ping_count;/*nombre de paquets à transmettre*/
+    struct icmphdr      ping_pckt;/*le packet icmp avec différentes valeur dedans (contient l'id, la séquence etc.)*/
+
     struct timeval      ping_start_time;/*pour calculer le temps mis pour recevoir un paquet*/
     size_t              ping_interval;/*interval en seconde à attendre avant chaque envoi*/
     size_t              ping_datalen;/*taille des données*/
     struct sockaddr_in  ping_address;/*adresse de ping*/
-
-    struct sockaddr_in  host_address;/*adresse de l'hôte*/
-    char                *hostname;/*nom d'hôte de la cible*/
-    char                *buffer_for_rec;
+    struct sockaddr_in  destination_address;/*adresse de l'hôte*/
     size_t              packet_emitted;/*nombre de paquets émis*/
     size_t              packet_received;/*nombre de paquets reçus*/ 
     size_t              packet_duplicated;/*nombre de paquets dupliqués*/

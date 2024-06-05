@@ -1,5 +1,8 @@
 {
     "files.associations": {
-        "errno.h": "c"
+        "errno.h": "c",
+        "in.h": "c",
+        "socket.h": "c",
+        "time.h": "c"
     }
 }

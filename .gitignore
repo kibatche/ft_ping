@@ -1,7 +1,8 @@
 ./ping
+a.out
 # Prerequisites
 *.d
-
+.vscode
 # Object files
 *.o
 *.ko

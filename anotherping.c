@@ -44,12 +44,12 @@ unsigned short checksum(void *b, int len)
     unsigned int sum = 0;
     unsigned short result;
 
-    for (sum = 0; len & gt; 1; len -= 2)
+    for (sum = 0; len > 1; len -= 2)
         sum += *buf++;
     if (len == 1)
         sum += *(unsigned char *)buf;
-    sum = (sum & gt; > 16) + (sum & amp; 0xFFFF);
-    sum += (sum & gt; > 16);
+    sum = (sum > 16) + (sum & 0xFFFF);
+    sum += (sum > 16);
     result = ~sum;
     return result;
 }
