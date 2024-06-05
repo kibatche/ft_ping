@@ -178,7 +178,6 @@ void send_ping()
         fprintf(stderr, "Error with sendto : %s\n", strerror(errno));
         ping.packet_emitted--;
     }
-    printf("%s\n", buffer_to_send);
 }
 
 void receive_ping()
@@ -198,7 +197,9 @@ void receive_ping()
             continue;
         }
         printf("OK\n");
+        ping.packet_received++;
     }
+    printf("BYe\n");
 }
 
 int main(int ac, char **av)
