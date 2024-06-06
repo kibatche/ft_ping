@@ -12,7 +12,7 @@ int timeout_opt;
 int usage_opt;
 
 const char *argp_program_version = "ft_ping 1.0";
-static char doc[] = "A program that reimplements ping.";
+static char doc[] = "A program that reimplements the ping program from inetutils.";
 static char args_doc[] = "ADDRESS";
 
 ping_infos ping;
@@ -90,20 +90,30 @@ void init_ping(ping_infos *ping)
     de retrouver une adresse ip à partir d'un nom 
     de domaine*/
     struct hostent *host_entity = NULL;
+    struct timeval timeout;      
+    timeout.tv_sec = RECV_TIMEOUT;
+    timeout.tv_usec = 0;
+    char *ip_temp;
     int fd;
 
     /*création de la raw socket avec le protocole icmp*/
     fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (fd == -1)
     {
-        fprintf(stderr, "ping: %s\n", strerror(errno));
+        fprintf(stderr, "ft_ping: %s\n", strerror(errno));
         free_arg(hostname);
         exit(EXIT_FAILURE);
     }
-    host_entity = gethostbyname(hostname);
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1)
+    {
+        fprintf(stderr, "ft_ping: setsockopt failed.\n");
+        free_arg(hostname);
+        exit(EXIT_FAILURE);
+    }
+    host_entity = gethostbyname(hostname);    
     if (host_entity == NULL)
     {
-        fprintf(stderr, "ping: unknown host\n");
+        fprintf(stderr, "ft_ping: unknown host\n");
         free_arg(hostname);
         exit(EXIT_FAILURE);
     }
@@ -116,13 +126,27 @@ void init_ping(ping_infos *ping)
     ping->ping_pckt.type = ICMP_ECHO;
     ping->ping_datalen = 64;/*ICMP_DATA_LEN (56) for the icmp req + 8 for ip header*/
     ping->destination_address.sin_family = AF_INET;
-    ping->destination_address.sin_addr.s_addr = inet_addr(host_entity->h_name);
+    ping->destination_host_name = hostname;
+    ip_temp = inet_ntoa(*((struct in_addr*) host_entity->h_addr_list[0]));
+    if (strlen(ip_temp) > 15)
+    {
+        fprintf(stderr, "ft_ping: bad ip len.\n");
+        free_arg(hostname);
+        exit(EXIT_FAILURE);
+    }
+    strcpy(ping->destination_ip_addr, ip_temp);
+    ping->destination_ip_addr[strlen(ip_temp)] = 0;
+    if (inet_aton(ip_temp, &ping->destination_address.sin_addr) == 0)
+    {
+        fprintf(stderr, "ft_ping: inet_aton failed. Bad ip notation ?\n");
+        free_arg(hostname);
+        exit(EXIT_FAILURE);
+    }
     ping->packet_emitted = 0;
     ping->packet_received = 0;
     ping->packet_duplicated = 0;
     ping->ping_interval = 1000;
     gettimeofday(&ping->ping_start_time, NULL);
-
 }
 
 void init_args()
@@ -132,7 +156,7 @@ void init_args()
     quiet_opt = 0;
     ttl_opt = 0;
     count_opt = 0;
-    timeout_opt = 0;
+    timeout_opt = 1;
     usage_opt = 0;
 }
 
@@ -167,17 +191,15 @@ unsigned short cal_chksum(unsigned short *addr, int len)
 
 void send_ping()
 {
-    ping.ping_pckt.un.echo.sequence++;
     ping.packet_emitted++;
     ping.ping_pckt.checksum = cal_chksum((unsigned short *)&ping.ping_pckt, 64);
-    printf("Avant memcopy\n");
     memcpy(buffer_to_send, &ping.ping_pckt, sizeof(ping.ping_pckt));
-    printf("Dan sens ping\n");
     if (sendto(ping.ping_fd, buffer_to_send, sizeof(buffer_to_send), 0, (struct sockaddr *)&ping.destination_address, sizeof(ping.destination_address)) < 0)
     {
         fprintf(stderr, "Error with sendto : %s\n", strerror(errno));
         ping.packet_emitted--;
     }
+    ping.ping_pckt.un.echo.sequence++;
 }
 
 void receive_ping()
@@ -190,16 +212,21 @@ void receive_ping()
         sizeof(buffer_to_receive), 0, (struct sockaddr*)&ping.ping_address, \
         (socklen_t *)&len_ping_addr) < 0)
         {
-            printf("PAS OK\n");
-            if (errno = EINTR)
+            int err = errno;
+            if (err == EAGAIN || err == EWOULDBLOCK || err == EINPROGRESS)
+            {
+                printf("Timeout\n");
                 continue;
-            fprintf(stderr, "recvfrom error\n");
+            }
             continue;
         }
-        printf("OK\n");
-        ping.packet_received++;
+        else
+        {
+            printf("%ld bytes from %s: icmp_seq=%d ttl=%d time=%d\n", ping.ping_datalen - 8, ping.destination_ip_addr, ping.ping_pckt.un.echo.sequence, 116, 1);
+            ping.packet_received++;
+            sleep(1);
+        }
     }
-    printf("BYe\n");
 }
 
 int main(int ac, char **av)
@@ -207,9 +234,10 @@ int main(int ac, char **av)
     init_args();
     argp_parse(&argp, ac, av, 0, 0, NULL);
     init_ping(&ping);
-    // int size = 1024 * 5;
-    // setsockopt(ping.ping_fd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
-    send_ping();
-    receive_ping();
+    while (1)
+    {
+        send_ping();
+        receive_ping();
+    }
     return 0;
 }

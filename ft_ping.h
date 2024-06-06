@@ -3,28 +3,32 @@
 
 # include "macros.h"
 
-# include <netinet/in.h>
-# include <netinet/ip_icmp.h>
 # include <argp.h>
-# include <sys/socket.h>
-# include <sys/time.h>
-# include <stddef.h>
+# include <arpa/inet.h>
 # include <errno.h>
 # include <error.h>
-# include <stdlib.h>
+# include <netinet/in.h>
+# include <netinet/ip_icmp.h>
+# include <netinet/in.h>
 # include <netdb.h>
+# include <stddef.h>
+# include <stdlib.h>
 # include <string.h>
+# include <sys/socket.h>
+# include <sys/time.h>
+# include <unistd.h>
 
 typedef struct ping_infos
 {
     int                 ping_fd;/*fd attribué à l'opération*/
-    struct icmphdr      ping_pckt;/*le packet icmp avec différentes valeur dedans (contient l'id, la séquence etc.)*/
-
+    struct icmphdr      ping_pckt;/*le packet icmp avec différentes valeurs dedans (contient l'id, la séquence etc.)*/
     struct timeval      ping_start_time;/*pour calculer le temps mis pour recevoir un paquet*/
     size_t              ping_interval;/*interval en seconde à attendre avant chaque envoi*/
     size_t              ping_datalen;/*taille des données*/
     struct sockaddr_in  ping_address;/*adresse de ping*/
     struct sockaddr_in  destination_address;/*adresse de l'hôte*/
+    char                *destination_host_name;
+    char                destination_ip_addr[15 + 1];
     size_t              packet_emitted;/*nombre de paquets émis*/
     size_t              packet_received;/*nombre de paquets reçus*/ 
     size_t              packet_duplicated;/*nombre de paquets dupliqués*/

@@ -1,4 +1,5 @@
-./ping/**
+ping/
+.gdb_history
 a.out
 # Prerequisites
 *.d
