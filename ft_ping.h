@@ -10,20 +10,20 @@
 # include <netinet/in.h>
 # include <netinet/ip_icmp.h>
 # include <netinet/in.h>
+# include <netinet/ip.h>
 # include <netdb.h>
 # include <stddef.h>
 # include <stdlib.h>
 # include <string.h>
 # include <sys/socket.h>
 # include <sys/time.h>
+# include <time.h>
 # include <unistd.h>
 
 typedef struct ping_infos
 {
     int                 ping_fd;/*fd attribué à l'opération*/
-    struct icmphdr      ping_pckt;/*le packet icmp avec différentes valeurs dedans (contient l'id, la séquence etc.)*/
-    struct timeval      ping_start_time;/*pour calculer le temps mis pour recevoir un paquet*/
-    size_t              ping_interval;/*interval en seconde à attendre avant chaque envoi*/
+    struct icmphdr      ping_pckt;
     size_t              ping_datalen;/*taille des données*/
     struct sockaddr_in  ping_address;/*adresse de ping*/
     struct sockaddr_in  destination_address;/*adresse de l'hôte*/

@@ -1,9 +1,15 @@
 # include "ft_ping.h"
 
 
+ping_infos ping;
 char *hostname;
 char buffer_to_send[4096];
 char buffer_to_receive[4096];
+int sequence;
+struct timespec tm_send;
+struct timespec tm_recv;
+
+/*opt*/
 int verbose_opt;
 int quiet_opt;
 int ttl_opt;
@@ -15,9 +21,6 @@ const char *argp_program_version = "ft_ping 1.0";
 static char doc[] = "A program that reimplements the ping program from inetutils.";
 static char args_doc[] = "ADDRESS";
 
-ping_infos ping;
-// ping_stats *ping_stats;
-
 static struct argp_option options[] = {
   {"verbose",  'v', 0, 0, "Produce verbose output" },
   {"quiet", 'q', 0, 0, "Produce a quiet output"},
@@ -27,8 +30,6 @@ static struct argp_option options[] = {
   {"usage", '?', 0, 0, "Don't produce any output" },
   {0}
 };
-
-
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
@@ -86,9 +87,6 @@ int sig_handler(int sig)
 
 void init_ping(ping_infos *ping)
 {
-    /*hostent est une structure qui nous permettra
-    de retrouver une adresse ip à partir d'un nom 
-    de domaine*/
     struct hostent *host_entity = NULL;
     struct timeval timeout;      
     timeout.tv_sec = RECV_TIMEOUT;
@@ -124,7 +122,6 @@ void init_ping(ping_infos *ping)
     ping->ping_pckt.checksum = 0;
     ping->ping_pckt.code = 0;
     ping->ping_pckt.type = ICMP_ECHO;
-    ping->ping_datalen = 64;/*ICMP_DATA_LEN (56) for the icmp req + 8 for ip header*/
     ping->destination_address.sin_family = AF_INET;
     ping->destination_host_name = hostname;
     ip_temp = inet_ntoa(*((struct in_addr*) host_entity->h_addr_list[0]));
@@ -145,8 +142,6 @@ void init_ping(ping_infos *ping)
     ping->packet_emitted = 0;
     ping->packet_received = 0;
     ping->packet_duplicated = 0;
-    ping->ping_interval = 1000;
-    gettimeofday(&ping->ping_start_time, NULL);
 }
 
 void init_args()
@@ -158,6 +153,7 @@ void init_args()
     count_opt = 0;
     timeout_opt = 1;
     usage_opt = 0;
+    sequence = 0;
 }
 
 unsigned short cal_chksum(unsigned short *addr, int len)
@@ -166,12 +162,6 @@ unsigned short cal_chksum(unsigned short *addr, int len)
     int sum = 0;
     unsigned short *w = addr;
     unsigned short answer = 0;
-
-    /* 
-     * The checksum is the 16-bit ones's complement of the one's
-     * complement sum of the ICMP message starting with the ICMP Type.
-     * For computing the checksum , the checksum field should be zero. 
-     */
 
     while(nleft > 1) {
         sum += *w++;
@@ -192,41 +182,66 @@ unsigned short cal_chksum(unsigned short *addr, int len)
 void send_ping()
 {
     ping.packet_emitted++;
-    ping.ping_pckt.checksum = cal_chksum((unsigned short *)&ping.ping_pckt, 64);
+    ping.ping_pckt.checksum = 0;
+    ping.ping_pckt.un.echo.sequence = sequence;
+    ping.ping_pckt.checksum = cal_chksum((unsigned short *)&ping.ping_pckt, sizeof(ping.ping_pckt));
+    clock_gettime(CLOCK_MONOTONIC ,&tm_send);
+    // clock_gettime(CLOCK_MONOTONIC_RAW, &tm_send);
     memcpy(buffer_to_send, &ping.ping_pckt, sizeof(ping.ping_pckt));
-    if (sendto(ping.ping_fd, buffer_to_send, sizeof(buffer_to_send), 0, (struct sockaddr *)&ping.destination_address, sizeof(ping.destination_address)) < 0)
+    if (sendto(ping.ping_fd, buffer_to_send, 64, 0, (struct sockaddr *)&ping.destination_address, sizeof(ping.destination_address)) < 0)
     {
         fprintf(stderr, "Error with sendto : %s\n", strerror(errno));
-        ping.packet_emitted--;
+        exit(EXIT_FAILURE);
     }
-    ping.ping_pckt.un.echo.sequence++;
+    sequence++;
+}
+
+double compute_time_spent(struct timespec *start, struct timespec *end)
+{
+    long time_spent_sec = end->tv_sec - start->tv_sec;
+    long time_spent_nsec = end->tv_nsec - start->tv_nsec;
+    
+    /*Si les nanosecondes de recv sont plus grand que celle de l'envoi*/
+    if (time_spent_nsec < 0)
+    {
+        time_spent_sec -= 1;
+        time_spent_nsec += 1000000000;
+    }
+    return time_spent_sec * 1000.0 + time_spent_nsec / 1000000.0;
+}
+
+void read_recv_buffer(char *recv_buf, int len, double time_spent)
+{
+    int iphdr_len;
+    struct iphdr *ip;
+    struct icmphdr *icmp;
+
+    ip = (struct iphdr *)recv_buf;
+
+    iphdr_len = ip->ihl << 2;
+    icmp = (struct icmphdr *)(recv_buf + iphdr_len);
+    len -= iphdr_len;/*taille de notre paquet de réception - taille de l'en-tête ip*/
+    if (icmp->type == ICMP_ECHOREPLY && icmp->un.echo.id == ping.ping_pckt.un.echo.id)
+    {
+        printf("%d bytes from %s: icmp_seq=%d ttl=%d time=%.3f ms\n", len, ping.destination_ip_addr, ping.ping_pckt.un.echo.sequence, ip->ttl, time_spent);
+
+    }
 }
 
 void receive_ping()
 {
-    while (ping.packet_received < ping.packet_emitted)
-    {
-        printf("Dans receive ping & fd  %d\n", ping.ping_fd);
         int len_ping_addr = sizeof(ping.ping_address);
-        if (recvfrom(ping.ping_fd, buffer_to_receive, \
+        int len_of_recv = recvfrom(ping.ping_fd, buffer_to_receive, \
         sizeof(buffer_to_receive), 0, (struct sockaddr*)&ping.ping_address, \
-        (socklen_t *)&len_ping_addr) < 0)
+        (socklen_t *)&len_ping_addr);
+        if ( len_of_recv >= 0)
         {
-            int err = errno;
-            if (err == EAGAIN || err == EWOULDBLOCK || err == EINPROGRESS)
-            {
-                printf("Timeout\n");
-                continue;
-            }
-            continue;
-        }
-        else
-        {
-            printf("%ld bytes from %s: icmp_seq=%d ttl=%d time=%d\n", ping.ping_datalen - 8, ping.destination_ip_addr, ping.ping_pckt.un.echo.sequence, 116, 1);
+            clock_gettime(CLOCK_MONOTONIC ,&tm_recv);
+            
+            read_recv_buffer(buffer_to_receive, len_of_recv, compute_time_spent(&tm_send, &tm_recv));
             ping.packet_received++;
-            sleep(1);
         }
-    }
+        sleep(1);
 }
 
 int main(int ac, char **av)
