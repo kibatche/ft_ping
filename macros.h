@@ -7,4 +7,7 @@
 # define MAX_TTL 255
 
 # define RECV_TIMEOUT 1
+
+# define MIN(x, y) (x < y ? x : y)
+# define MAX(x, y) (x > y ? x : y)
 #endif

@@ -28,7 +28,7 @@ typedef struct ping_infos
     struct sockaddr_in  ping_address;/*adresse de ping*/
     struct sockaddr_in  destination_address;/*adresse de l'hôte*/
     char                *destination_host_name;
-    char                destination_ip_addr[15 + 1];
+    char                destination_ip_addr[INET_ADDRSTRLEN];
     size_t              packet_emitted;/*nombre de paquets émis*/
     size_t              packet_received;/*nombre de paquets reçus*/ 
     size_t              packet_duplicated;/*nombre de paquets dupliqués*/
@@ -43,5 +43,9 @@ typedef struct ping_stats
 }               ping_stats;
 
 char *dns_lookup(void);
+void free_arg(void *arg);
+int sig_handler(int signal);
+void init_ping(ping_infos *ping);
+
 
 #endif
