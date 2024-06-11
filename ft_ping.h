@@ -2,6 +2,7 @@
 # define FT_PING_H
 
 # include "macros.h"
+# include "utils.h"
 
 # include <argp.h>
 # include <arpa/inet.h>
@@ -15,10 +16,11 @@
 # include <stddef.h>
 # include <stdlib.h>
 # include <string.h>
+# include <sys/select.h>
 # include <sys/socket.h>
 # include <sys/time.h>
-# include <time.h>
 # include <unistd.h>
+# include <signal.h>
 
 typedef struct ping_infos
 {
@@ -44,8 +46,10 @@ typedef struct ping_stats
 
 char *dns_lookup(void);
 void free_arg(void *arg);
-int sig_handler(int signal);
+void sig_handler(int signal);
 void init_ping(ping_infos *ping);
-
+void errors(const char *error, int err);
+void check_host(ping_infos *ping);
+void print_intro();
 
 #endif

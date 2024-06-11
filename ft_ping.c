@@ -1,5 +1,9 @@
 # include "ft_ping.h"
 
+/*volatile empêche l'opti du compilo, ref : https://www.gnu.org/software/c-intro-and-ref/manual/html_node/volatile.html */
+volatile sig_atomic_t cont;/*pour arrêter la boucle*/
+
+int sleep_sec;
 
 ping_infos ping;
 ping_stats *stats;
@@ -12,52 +16,18 @@ struct timespec tm_recv;
 
 /*opt*/
 int verbose_opt;
-int quiet_opt;
 int ttl_opt;
-int count_opt;
-int timeout_opt;
-int usage_opt;
 
 const char *argp_program_version = "ft_ping 1.0";
 static char doc[] = "A program that partially reimplements the ping program from inetutils.";
-static char args_doc[] = "ADDRESS";
+static char args_doc[] = "HOST";
 
 static struct argp_option options[] = {
-  {"verbose",  'v', 0, 0, "Produce verbose output" },
-  {"quiet", 'q', 0, 0, "Produce a quiet output"},
+  {"verbose",  'v', 0, 0, "verbose output" },
   {"ttl", TTL_ARG, "N", 0, "specify N as time-to-live"},
-  {"usage", '?', 0, 0, "Don't produce any output" },
   {0}
 };
 
-unsigned long int check_ttl_value(const char *ttl)
-{
-    char *p;
-    unsigned long int n;
-
-    n = strtoul(ttl, &p, 0);
-    if (*p)
-    {
-        fprintf(stderr, "invalid value (`%s' near `%s')", ttl, p);
-        free_arg(hostname);
-        exit(EXIT_FAILURE);
-    }
-    if (n == 0)
-    {
-        fprintf(stderr, "option value too small: %s\n", ttl);
-        free_arg(hostname);
-        exit(EXIT_FAILURE);
-    }
-    if (n > 255)
-    {
-        fprintf(stderr, "option value too big: %s\n", ttl);
-        free_arg(hostname);
-        exit(EXIT_FAILURE);
-    }
-    printf("ttl : %ld\n", n);
-
-    return n;
-}
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
@@ -68,14 +38,8 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         case 'v':
             verbose_opt = 1;
             break;
-        case 'q':
-            quiet_opt = 1;
-            break;
         case TTL_ARG:
-            ttl_opt = check_ttl_value(arg); /*A IMPLEMENTER*/
-        case '?' :
-            usage_opt = 1;
-            break;
+            ttl_opt = check_ttl_value(arg);
         case ARGP_KEY_ARG:
             if (state->arg_num >= 1)
                 argp_usage(state);
@@ -93,95 +57,91 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 
 static struct argp argp = { options, parse_opt, args_doc, doc };
 
-void free_arg(void *arg)
+void errors(const char *errstr, int err)
 {
-    if (arg != NULL)
+    free_arg(hostname);
+    free_arg(stats);
+    if (errstr !=  NULL && err != 0)
+        error(EXIT_FAILURE, err, "%s\n", errstr);
+    exit(EXIT_FAILURE);
+}
+
+void sig_handler(int sig)
+{
+    cont = 0;
+}
+
+void check_host(ping_infos *ping)
+{
+    struct hostent *host_entity = NULL;
+    char *ip_temp;
+    int res;
+    size_t len;
+
+    res = inet_pton(AF_INET, hostname, &ping->destination_address.sin_addr); 
+    if (!res)
     {
-        free(arg);
-        arg = NULL;
+        host_entity = gethostbyname(hostname);    
+        if (host_entity == NULL)
+        {
+            fprintf(stderr, "ft_ping: unknown host\n");
+            errors(NULL, 0);
+        }
+        ip_temp = inet_ntoa(*((struct in_addr*) host_entity->h_addr_list[0]));
+        len = strlen(ip_temp);
+        if (len >= INET_ADDRSTRLEN)
+        {
+            fprintf(stderr, "ft_ping: bad ip len.\n");
+            errors(NULL, 0);
+        }
+        strcpy(ping->destination_ip_addr, ip_temp);
+        ping->destination_ip_addr[len] = 0;
+        if (inet_aton(ip_temp, &ping->destination_address.sin_addr) == 0)
+        {
+            fprintf(stderr, "ft_ping: inet_aton failed. Bad ip notation ?\n");
+            errors(NULL, 0);
+        }
     }
+    else
+        strcpy(ping->destination_ip_addr, hostname);
 }
-
-int sig_handler(int sig)
-{
-//TODO
-}
-
-
 
 void init_ping(ping_infos *ping)
 {
-    struct hostent *host_entity = NULL;
     struct timeval timeout;      
     timeout.tv_sec = RECV_TIMEOUT;
     timeout.tv_usec = 0;
-    char *ip_temp;
     int fd;
 
     /*création de la raw socket avec le protocole icmp*/
     fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (fd == -1)
-    {
-        fprintf(stderr, "ft_ping: %s\n", strerror(errno));
-        free_arg(hostname);
-        exit(EXIT_FAILURE);
-    }
+        errors("socket", errno);
     if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1)
-    {
-        fprintf(stderr, "ft_ping: setsockopt failed.\n");
-        free_arg(hostname);
-        exit(EXIT_FAILURE);
-    }
+        errors("setsockopt (timeout)", errno);
     if (ttl_opt)
-    {
         if (setsockopt(fd, SOL_IP, IP_TTL, &ttl_opt, sizeof(ttl_opt)) == -1)
-        {
-            fprintf(stderr, "ft_ping: (ttl) %s\n", strerror(errno));
-            free_arg(hostname);
-            exit(EXIT_FAILURE);
-        }
-    }
-    host_entity = gethostbyname(hostname);    
-    if (host_entity == NULL)
-    {
-        fprintf(stderr, "ft_ping: unknown host\n");
-        free_arg(hostname);
-        exit(EXIT_FAILURE);
-    }
+            errors("setsockopt (ttl)", errno);
     bzero(ping, sizeof(ping_infos));
     ping->ping_fd = fd;
+    ping->destination_address.sin_family = AF_INET;
+    check_host(ping);
     ping->ping_pckt.un.echo.id = htons(getpid());
     ping->ping_pckt.un.echo.sequence = 0;
     ping->ping_pckt.checksum = 0;
     ping->ping_pckt.code = 0;
     ping->ping_pckt.type = ICMP_ECHO;
-    ping->destination_address.sin_family = AF_INET;
     ping->destination_host_name = hostname;
-    ip_temp = inet_ntoa(*((struct in_addr*) host_entity->h_addr_list[0]));
-    if (strlen(ip_temp) >= INET_ADDRSTRLEN)
-    {
-        fprintf(stderr, "ft_ping: bad ip len.\n");
-        free_arg(hostname);
-        exit(EXIT_FAILURE);
-    }
-    strcpy(ping->destination_ip_addr, ip_temp);
-    ping->destination_ip_addr[strlen(ip_temp)] = 0;
-    if (inet_aton(ip_temp, &ping->destination_address.sin_addr) == 0)
-    {
-        fprintf(stderr, "ft_ping: inet_aton failed. Bad ip notation ?\n");
-        free_arg(hostname);
-        exit(EXIT_FAILURE);
-    }
     ping->packet_emitted = 0;
     ping->packet_received = 0;
     ping->packet_duplicated = 0;
+}
 
+void init_stats()
+{
     stats = malloc(sizeof(ping_stats));
     if (stats == NULL)
-    {
-        free_arg(hostname);
-        exit(EXIT_FAILURE);
-    }
+        errors("malloc", errno);
     stats->max_round_trip = 0.0;
     stats->min_round_trip = 0.0;
     stats->squared_of_round_trip = 0.0;
@@ -191,34 +151,11 @@ void init_ping(ping_infos *ping)
 void init_args()
 {
     hostname = NULL;
+    stats = NULL;
     verbose_opt = 0;
-    quiet_opt = 0;
     ttl_opt = 0;
-    usage_opt = 0;
     sequence = 0;
-}
-
-unsigned short cal_chksum(unsigned short *addr, int len)
-{
-    int nleft = len;
-    int sum = 0;
-    unsigned short *w = addr;
-    unsigned short answer = 0;
-
-    while(nleft > 1) {
-        sum += *w++;
-        nleft -= 2;
-    }
-
-    if( nleft == 1) {
-        *(unsigned char *)(&answer) = *(unsigned char *)w;
-        sum += answer;
-    }
-
-    sum = (sum >> 16) + (sum & 0xffff);
-    sum += (sum >> 16);
-    answer = ~sum;
-    return answer;
+    cont = 1;
 }
 
 void send_ping()
@@ -226,29 +163,12 @@ void send_ping()
     ping.packet_emitted++;
     ping.ping_pckt.checksum = 0;
     ping.ping_pckt.un.echo.sequence = sequence;
-    ping.ping_pckt.checksum = cal_chksum((unsigned short *)&ping.ping_pckt, sizeof(ping.ping_pckt));
+    ping.ping_pckt.checksum = checksum((unsigned short *)&ping.ping_pckt, sizeof(ping.ping_pckt));
     clock_gettime(CLOCK_MONOTONIC, &tm_send);
     memcpy(buffer_to_send, &ping.ping_pckt, sizeof(ping.ping_pckt));
     if (sendto(ping.ping_fd, buffer_to_send, 64, 0, (struct sockaddr *)&ping.destination_address, sizeof(ping.destination_address)) < 0)
-    {
-        fprintf(stderr, "Error with sendto : %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
+        errors("sendto", errno);
     sequence++;
-}
-
-double compute_time_spent(struct timespec *start, struct timespec *end)
-{
-    long time_spent_sec = end->tv_sec - start->tv_sec;
-    long time_spent_nsec = end->tv_nsec - start->tv_nsec;
-    
-    /*Si les nanosecondes de recv sont plus grandes que celles de l'envoi*/
-    if (time_spent_nsec < 0)
-    {
-        time_spent_sec -= 1;
-        time_spent_nsec += 1000000000;
-    }
-    return time_spent_sec * 1000.0 + time_spent_nsec / 1000000.0;
 }
 
 void read_recv_buffer(char *recv_buf, int len, double time_spent)
@@ -260,15 +180,26 @@ void read_recv_buffer(char *recv_buf, int len, double time_spent)
 
     ip = (struct iphdr *)recv_buf;
     iphdr_len = ip->ihl * 4;/*taille de l'en-tête ip*/
-    icmp = (struct icmphdr *)(recv_buf + iphdr_len);
+    icmp = (struct icmphdr *)(recv_buf + iphdr_len);/*struct icmp*/
     len -= iphdr_len;/*taille de notre paquet de réception - taille de l'en-tête ip*/
     inet_ntop(AF_INET, (struct sockaddr_in *)&ip->saddr, ip_addr, INET_ADDRSTRLEN);
-    if (icmp->type == ICMP_ECHOREPLY && icmp->un.echo.id == ping.ping_pckt.un.echo.id)
+    if (len < ping.ping_datalen)
     {
+        fprintf(stderr, "packet too short (%d bytes) from %s\n", len, inet_ntoa(ping.destination_address.sin_addr));
+    }
+    else if (icmp->type == ICMP_ECHOREPLY && icmp->un.echo.id == ping.ping_pckt.un.echo.id )
+    {
+        int checksum_of_icmp = icmp->checksum;
+        icmp->checksum = 0;
+        if (checksum_of_icmp != checksum((unsigned short *) icmp, sizeof(*icmp)))
+        {
+            fprintf(stderr, "checksum mismatch from %s\n", inet_ntoa(ping.destination_address.sin_addr));
+        }
         printf("%d bytes from %s: icmp_seq=%d ttl=%d time=%.3f ms\n", len, ip_addr, icmp->un.echo.sequence, ip->ttl, time_spent);
         stats->max_round_trip = MAX(stats->max_round_trip, time_spent);
         stats->min_round_trip = MIN(stats->min_round_trip, time_spent);
         stats->sum_of_round_trip += time_spent;
+        ping.packet_received++;
     }
     else if (icmp->type == ICMP_TIME_EXCEEDED)
     {
@@ -280,28 +211,60 @@ void receive_ping()
 {
         int len_ping_addr = sizeof(ping.ping_address);
         int len_of_recv = recvfrom(ping.ping_fd, buffer_to_receive, \
-        sizeof(buffer_to_receive), 0, (struct sockaddr*)&ping.ping_address, \
+        sizeof(buffer_to_receive), MSG_DONTWAIT, (struct sockaddr*)&ping.ping_address, \
         (socklen_t *)&len_ping_addr);
         if ( len_of_recv >= 0)
         {
             clock_gettime(CLOCK_MONOTONIC ,&tm_recv);            
             read_recv_buffer(buffer_to_receive, len_of_recv, compute_time_spent(&tm_send, &tm_recv));
-            ping.packet_received++;
         }
-        sleep(1);
+}
+
+void print_intro()
+{
+    printf("PING %s (%s): 56 data bytes", ping.destination_host_name, ping.destination_ip_addr);
+    if (verbose_opt)
+        printf(", id %#x = %d", ping.ping_pckt.un.echo.id, ping.ping_pckt.un.echo.id);
+    putchar('\n');
 }
 
 int main(int ac, char **av)
 {
+    fd_set fdset;
+    struct timeval tv;
+    int sel;
+
     init_args();
     argp_parse(&argp, ac, av, 0, 0, NULL);
     init_ping(&ping);
-    signal();
-    while (1)
+    init_stats();
+    
+    print_intro();
+    signal(SIGINT, sig_handler);
+    send_ping();
+    while (cont)
     {
-        send_ping();
-        receive_ping();
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
+        FD_ZERO(&fdset);
+        FD_SET(ping.ping_fd, &fdset);
+        sel = select(ping.ping_fd + 1, &fdset, NULL, NULL, &tv);
+        if (sel < 0)
+        {
+            if (errno != EINTR)
+                errors("select", errno);
+            continue;
+        }
+        else if (sel == 1)
+        {
+            if (FD_ISSET(ping.ping_fd, &fdset))
+                receive_ping();
+        }
+        else
+            send_ping();
     }
+    printf("--- %s ping statistics ---\n", ping.destination_host_name);
+    printf("%ld packets transmitted, %ld packets received, %d%% packet loss\n", ping.packet_emitted, ping.packet_received, (int)(((ping.packet_emitted - ping.packet_received) * 100)/ping.packet_emitted));
     free_arg(hostname);
     free_arg(stats);
     return 0;
