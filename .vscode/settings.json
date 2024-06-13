@@ -11,6 +11,7 @@
         "ft_ping.h": "c",
         "ip_icmp.h": "c",
         "string.h": "c",
-        "inet.h": "c"
+        "inet.h": "c",
+        "select.h": "c"
     }
 }

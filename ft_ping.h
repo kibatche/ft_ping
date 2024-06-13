@@ -8,6 +8,7 @@
 # include <arpa/inet.h>
 # include <errno.h>
 # include <error.h>
+# include <float.h>
 # include <netinet/in.h>
 # include <netinet/ip_icmp.h>
 # include <netinet/in.h>
@@ -31,9 +32,8 @@ typedef struct ping_infos
     struct sockaddr_in  destination_address;/*adresse de l'hôte*/
     char                *destination_host_name;
     char                destination_ip_addr[INET_ADDRSTRLEN];
-    size_t              packet_emitted;/*nombre de paquets émis*/
+    size_t              packet_transmitted;/*nombre de paquets émis*/
     size_t              packet_received;/*nombre de paquets reçus*/ 
-    size_t              packet_duplicated;/*nombre de paquets dupliqués*/
 }               ping_infos;
 
 typedef struct ping_stats
@@ -44,12 +44,19 @@ typedef struct ping_stats
     double squared_of_round_trip;/*somme de tous les temps de réception au carré de paquets pour un hôte donné afin de calculer l'écart type*/
 }               ping_stats;
 
-char *dns_lookup(void);
 void free_arg(void *arg);
-void sig_handler(int signal);
-void init_ping(ping_infos *ping);
 void errors(const char *error, int err);
+void sig_handler(int signal);
+
+void init_args();
+void init_ping(ping_infos *ping);
 void check_host(ping_infos *ping);
+void init_stats();
+void send_ping();
+void receive_ping();
+void read_recv_buffer(char *recv_buf, int len, double time_spent);
 void print_intro();
+void print_outro();
+void print_stats();
 
 #endif

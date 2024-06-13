@@ -132,9 +132,8 @@ void init_ping(ping_infos *ping)
     ping->ping_pckt.code = 0;
     ping->ping_pckt.type = ICMP_ECHO;
     ping->destination_host_name = hostname;
-    ping->packet_emitted = 0;
+    ping->packet_transmitted = 0;
     ping->packet_received = 0;
-    ping->packet_duplicated = 0;
 }
 
 void init_stats()
@@ -142,8 +141,8 @@ void init_stats()
     stats = malloc(sizeof(ping_stats));
     if (stats == NULL)
         errors("malloc", errno);
-    stats->max_round_trip = 0.0;
-    stats->min_round_trip = 0.0;
+    stats->max_round_trip = DBL_MIN;
+    stats->min_round_trip = DBL_MAX;
     stats->squared_of_round_trip = 0.0;
     stats->sum_of_round_trip = 0.0;
 }
@@ -160,15 +159,31 @@ void init_args()
 
 void send_ping()
 {
-    ping.packet_emitted++;
     ping.ping_pckt.checksum = 0;
-    ping.ping_pckt.un.echo.sequence = sequence;
+    ping.ping_pckt.un.echo.sequence = htons(sequence);
     ping.ping_pckt.checksum = checksum((unsigned short *)&ping.ping_pckt, sizeof(ping.ping_pckt));
-    clock_gettime(CLOCK_MONOTONIC, &tm_send);
     memcpy(buffer_to_send, &ping.ping_pckt, sizeof(ping.ping_pckt));
-    if (sendto(ping.ping_fd, buffer_to_send, 64, 0, (struct sockaddr *)&ping.destination_address, sizeof(ping.destination_address)) < 0)
+    clock_gettime(CLOCK_MONOTONIC, &tm_send);
+    if (sendto(ping.ping_fd, buffer_to_send, 64, 0, (struct sockaddr *)&ping.destination_address, sizeof(ping.destination_address)) == -1)
         errors("sendto", errno);
+    ping.packet_transmitted++;
     sequence++;
+}
+
+void receive_ping()
+{
+    socklen_t len_ping_addr = sizeof(ping.ping_address);
+    struct timespec tm_to_sleep;
+    int len_of_recv = recvfrom(ping.ping_fd, buffer_to_receive, \
+        sizeof(buffer_to_receive), 0, (struct sockaddr*)&ping.ping_address, \
+        &len_ping_addr);
+    clock_gettime(CLOCK_MONOTONIC ,&tm_recv);
+    double time_spent = compute_time_spent(&tm_send, &tm_recv, &tm_to_sleep);
+    if ( len_of_recv >= 0)
+    {
+        read_recv_buffer(buffer_to_receive, len_of_recv, time_spent);
+    }
+    nanosleep(&tm_to_sleep, NULL);
 }
 
 void read_recv_buffer(char *recv_buf, int len, double time_spent)
@@ -181,11 +196,11 @@ void read_recv_buffer(char *recv_buf, int len, double time_spent)
     ip = (struct iphdr *)recv_buf;
     iphdr_len = ip->ihl * 4;/*taille de l'en-tête ip*/
     icmp = (struct icmphdr *)(recv_buf + iphdr_len);/*struct icmp*/
-    len -= iphdr_len;/*taille de notre paquet de réception - taille de l'en-tête ip*/
-    inet_ntop(AF_INET, (struct sockaddr_in *)&ip->saddr, ip_addr, INET_ADDRSTRLEN);
+    len -= iphdr_len;/*taille de notre paquet reçu - taille de l'en-tête ip*/
+    inet_ntop(AF_INET, (struct sockaddr_in *)&ip->saddr, ip_addr, INET_ADDRSTRLEN);/*convertir l'adresse ip numérique en représentation x.x.x.x*/
     if (len < ping.ping_datalen)
     {
-        fprintf(stderr, "packet too short (%d bytes) from %s\n", len, inet_ntoa(ping.destination_address.sin_addr));
+        fprintf(stderr, "packet too short (%d bytes) from %s\n", len, ip_addr);
     }
     else if (icmp->type == ICMP_ECHOREPLY && icmp->un.echo.id == ping.ping_pckt.un.echo.id )
     {
@@ -193,79 +208,64 @@ void read_recv_buffer(char *recv_buf, int len, double time_spent)
         icmp->checksum = 0;
         if (checksum_of_icmp != checksum((unsigned short *) icmp, sizeof(*icmp)))
         {
-            fprintf(stderr, "checksum mismatch from %s\n", inet_ntoa(ping.destination_address.sin_addr));
+            fprintf(stderr, "checksum mismatch from %s\n", ip_addr);
         }
         printf("%d bytes from %s: icmp_seq=%d ttl=%d time=%.3f ms\n", len, ip_addr, icmp->un.echo.sequence, ip->ttl, time_spent);
         stats->max_round_trip = MAX(stats->max_round_trip, time_spent);
         stats->min_round_trip = MIN(stats->min_round_trip, time_spent);
         stats->sum_of_round_trip += time_spent;
+        stats->squared_of_round_trip += time_spent * time_spent;
         ping.packet_received++;
     }
     else if (icmp->type == ICMP_TIME_EXCEEDED)
     {
-        printf("%d bytes from %s: Time to live exceeded\n", len, ip_addr);
+        printf("%d bytes from %s (%s): Time to live exceeded\n", len, ip_addr, ip_addr);
     }
-}
-
-void receive_ping()
-{
-        int len_ping_addr = sizeof(ping.ping_address);
-        int len_of_recv = recvfrom(ping.ping_fd, buffer_to_receive, \
-        sizeof(buffer_to_receive), MSG_DONTWAIT, (struct sockaddr*)&ping.ping_address, \
-        (socklen_t *)&len_ping_addr);
-        if ( len_of_recv >= 0)
-        {
-            clock_gettime(CLOCK_MONOTONIC ,&tm_recv);            
-            read_recv_buffer(buffer_to_receive, len_of_recv, compute_time_spent(&tm_send, &tm_recv));
-        }
-}
-
-void print_intro()
-{
-    printf("PING %s (%s): 56 data bytes", ping.destination_host_name, ping.destination_ip_addr);
-    if (verbose_opt)
-        printf(", id %#x = %d", ping.ping_pckt.un.echo.id, ping.ping_pckt.un.echo.id);
-    putchar('\n');
 }
 
 int main(int ac, char **av)
 {
-    fd_set fdset;
-    struct timeval tv;
-    int sel;
-
     init_args();
     argp_parse(&argp, ac, av, 0, 0, NULL);
     init_ping(&ping);
-    init_stats();
-    
+    init_stats();   
     print_intro();
     signal(SIGINT, sig_handler);
-    send_ping();
     while (cont)
     {
-        tv.tv_sec = 1;
-        tv.tv_usec = 0;
-        FD_ZERO(&fdset);
-        FD_SET(ping.ping_fd, &fdset);
-        sel = select(ping.ping_fd + 1, &fdset, NULL, NULL, &tv);
-        if (sel < 0)
-        {
-            if (errno != EINTR)
-                errors("select", errno);
-            continue;
-        }
-        else if (sel == 1)
-        {
-            if (FD_ISSET(ping.ping_fd, &fdset))
-                receive_ping();
-        }
-        else
-            send_ping();
+        send_ping();
+        receive_ping();
     }
-    printf("--- %s ping statistics ---\n", ping.destination_host_name);
-    printf("%ld packets transmitted, %ld packets received, %d%% packet loss\n", ping.packet_emitted, ping.packet_received, (int)(((ping.packet_emitted - ping.packet_received) * 100)/ping.packet_emitted));
+    print_outro();
     free_arg(hostname);
     free_arg(stats);
     return 0;
+}
+
+void print_intro()
+{
+    printf("PING %s (%s): %d data bytes", ping.destination_host_name, ping.destination_ip_addr, DATALEN);
+    if (verbose_opt)
+        printf(", id %#x = %d", ping.ping_pckt.un.echo.id, ping.ping_pckt.un.echo.id);
+    printf("\n");
+}
+
+void print_outro()
+{   
+    printf("--- %s ping statistics ---\n", ping.destination_host_name);
+    printf("%ld packets transmitted, %ld packets received,", ping.packet_transmitted, ping.packet_received);
+    if (ping.packet_transmitted < ping.packet_received)
+        printf (" -- somebody is printing forged packets!\n");
+    else
+        printf(" %d%% packet loss\n", (int)(((ping.packet_transmitted - ping.packet_received) * 100) / ping.packet_transmitted));
+    if (ping.packet_received)
+        print_stats();
+}
+
+void print_stats()
+{
+    double av = stats->sum_of_round_trip / ping.packet_received;
+    //écart type == racine carrée de la variance, qui est la moyenne des carrés des valeurs - le carré de la moyenne des valeurs
+    double stddev = mysqrt(stats->squared_of_round_trip / ping.packet_received - av * av);
+    printf("round-trip min/avg/max/stddev = %.3f/%.3f/%.3f/%.3f ms\n", stats->min_round_trip, av, stats->max_round_trip, stddev);
 }
