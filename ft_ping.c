@@ -44,6 +44,8 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
             if (state->arg_num >= 1)
                 argp_usage(state);
             hostname = strdup(arg);
+            if (hostname == NULL)
+                errors("strdup", errno);
            break;     
         case ARGP_KEY_END:
             if (state->arg_num < 1)
@@ -120,14 +122,14 @@ void init_ping(ping_infos *ping)
     if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1)
         errors("setsockopt (timeout)", errno);
     if (ttl_opt)
-        if (setsockopt(fd, SOL_IP, IP_TTL, &ttl_opt, sizeof(ttl_opt)) == -1)
+        if (setsockopt(fd, IPPROTO_IP, IP_TTL, &ttl_opt, sizeof(ttl_opt)) == -1)
             errors("setsockopt (ttl)", errno);
     bzero(ping, sizeof(ping_infos));
     ping->ping_fd = fd;
     ping->destination_address.sin_family = AF_INET;
     check_host(ping);
     ping->ping_pckt.un.echo.id = htons(getpid());
-    ping->ping_pckt.un.echo.sequence = 0;
+    ping->ping_pckt.un.echo.sequence = htons(0);
     ping->ping_pckt.checksum = 0;
     ping->ping_pckt.code = 0;
     ping->ping_pckt.type = ICMP_ECHO;
@@ -186,11 +188,45 @@ void receive_ping()
     nanosleep(&tm_to_sleep, NULL);
 }
 
+void print_ip_icmp_headers(void *ic)
+{
+    struct iphdr *ip;
+    struct icmphdr *icmp;
+    unsigned char *ip_to_print = (unsigned char *)ip;
+    char src_addr_st[INET_ADDRSTRLEN];
+    char dst_addr_st[INET_ADDRSTRLEN];
+
+    ip = (struct iphdr *)ic;
+    icmp = (struct icmphdr *)(ic + sizeof(struct iphdr));/*struct icmp*/
+
+    inet_ntop(AF_INET, (struct sockaddr_in *)&ip->saddr, src_addr_st, INET_ADDRSTRLEN);
+    inet_ntop(AF_INET, (struct sockaddr_in *)&ip->daddr, dst_addr_st, INET_ADDRSTRLEN);
+    ip_to_print = (unsigned char *)ip;
+    printf("IP Hdr Dump:\n");
+    for (int i = 0; i < sizeof(*ip); i ++)
+    {
+        printf("%02x%s", ip_to_print[i], (i & 1 ? " " : ""));
+    }
+    printf("\n");
+    printf("Vr HL TOS  Len   ID Flg  off TTL Pro  cks      Src\tDst\tData\n");
+    //https://en.wikipedia.org/wiki/IPv4#Flags => on conervse les trois premiers bits les plus significatifs.
+    uint32_t fl = ntohs(ip->frag_off) >> 13;
+    // https://en.wikipedia.org/wiki/IPv4#Fragment%20offset => les 13 bits de l'offset donc
+    uint32_t off = ntohs(ip->frag_off) & 0x1fff;
+    // on utilise ntohs pour être sûr que la lecture des données se fait dans l'ordre de l'hôte (little endian ou big endian). Les réseaux utilisent toujours le big endian.
+    printf(" %1x  %1x  %02x  %04x %04x   %1x %04x  %02x  %02x %04x %s  %s ", \
+    ip->version, ip->ihl, ip->tos, ntohs(ip->tot_len), ntohs(ip->id), fl, off, ip->ttl, ip->protocol, ntohs(ip->check), src_addr_st, dst_addr_st);
+    printf("\n");
+}
+
+
 void read_recv_buffer(char *recv_buf, int len, double time_spent)
 {
     struct iphdr *ip;
     int iphdr_len;
     struct icmphdr *icmp;
+
+    
     char ip_addr[INET_ADDRSTRLEN];
 
     ip = (struct iphdr *)recv_buf;
@@ -198,6 +234,7 @@ void read_recv_buffer(char *recv_buf, int len, double time_spent)
     icmp = (struct icmphdr *)(recv_buf + iphdr_len);/*struct icmp*/
     len -= iphdr_len;/*taille de notre paquet reçu - taille de l'en-tête ip*/
     inet_ntop(AF_INET, (struct sockaddr_in *)&ip->saddr, ip_addr, INET_ADDRSTRLEN);/*convertir l'adresse ip numérique en représentation x.x.x.x*/
+    
     if (len < ping.ping_datalen)
     {
         fprintf(stderr, "packet too short (%d bytes) from %s\n", len, ip_addr);
@@ -208,7 +245,7 @@ void read_recv_buffer(char *recv_buf, int len, double time_spent)
         icmp->checksum = 0;
         if (checksum_of_icmp != checksum((unsigned short *) icmp, sizeof(*icmp)))
         {
-            fprintf(stderr, "checksum mismatch from %s\n", ip_addr);
+            fprintf(stderr, "checksum mismatch from %s\n", ip_addr);// cela veut dire que la façon dont le calcul a été fait par le serveur cible est différent.
         }
         printf("%d bytes from %s: icmp_seq=%d ttl=%d time=%.3f ms\n", len, ip_addr, icmp->un.echo.sequence, ip->ttl, time_spent);
         stats->max_round_trip = MAX(stats->max_round_trip, time_spent);
@@ -220,6 +257,8 @@ void read_recv_buffer(char *recv_buf, int len, double time_spent)
     else if (icmp->type == ICMP_TIME_EXCEEDED)
     {
         printf("%d bytes from %s (%s): Time to live exceeded\n", len, ip_addr, ip_addr);
+        if (verbose_opt)
+            print_ip_icmp_headers(icmp);
     }
 }
 
