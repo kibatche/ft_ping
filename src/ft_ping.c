@@ -19,20 +19,18 @@ int verbose_opt;
 int ttl_opt;
 
 const char *argp_program_version = "ft_ping 1.0";
-static char doc[] = "A program that partially reimplements the ping program from inetutils.";
+static char doc[] = "Send ICMP ECHO_REQUEST packets to network hosts.";
 static char args_doc[] = "HOST";
 
 static struct argp_option options[] = {
-  {"verbose",  'v', 0, 0, "verbose output" },
-  {"ttl", TTL_ARG, "N", 0, "specify N as time-to-live"},
+  {"verbose",  'v', 0, 0, "verbose output", 0},
+  {"ttl", TTL_ARG, "N", 0, "specify N as time-to-live", 0},
   {0}
 };
 
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
-    struct arguments *args = state->input;
-
     switch(key)
     {
         case 'v':
@@ -40,6 +38,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
             break;
         case TTL_ARG:
             ttl_opt = check_ttl_value(arg);
+            break;
         case ARGP_KEY_ARG:
             if (state->arg_num >= 1)
                 argp_usage(state);
@@ -57,7 +56,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     return 0;
 }
 
-static struct argp argp = { options, parse_opt, args_doc, doc };
+static struct argp argp = { options, parse_opt, args_doc, doc, 0, 0, 0 };
 
 void errors(const char *errstr, int err)
 {
@@ -70,6 +69,7 @@ void errors(const char *errstr, int err)
 
 void sig_handler(int sig)
 {
+    (void)sig;
     cont = 0;
 }
 
@@ -161,8 +161,9 @@ void init_args()
 
 void send_ping()
 {
+    //nécessaire de remttre à 0 pour recalculer
     ping.ping_pckt.checksum = 0;
-    ping.ping_pckt.un.echo.sequence = htons(sequence);
+    ping.ping_pckt.un.echo.sequence = sequence;
     ping.ping_pckt.checksum = checksum((unsigned short *)&ping.ping_pckt, sizeof(ping.ping_pckt));
     memcpy(buffer_to_send, &ping.ping_pckt, sizeof(ping.ping_pckt));
     clock_gettime(CLOCK_MONOTONIC, &tm_send);
@@ -188,45 +189,11 @@ void receive_ping()
     nanosleep(&tm_to_sleep, NULL);
 }
 
-void print_ip_icmp_headers(void *ic)
-{
-    struct iphdr *ip;
-    struct icmphdr *icmp;
-    unsigned char *ip_to_print = (unsigned char *)ip;
-    char src_addr_st[INET_ADDRSTRLEN];
-    char dst_addr_st[INET_ADDRSTRLEN];
-
-    ip = (struct iphdr *)ic;
-    icmp = (struct icmphdr *)(ic + sizeof(struct iphdr));/*struct icmp*/
-
-    inet_ntop(AF_INET, (struct sockaddr_in *)&ip->saddr, src_addr_st, INET_ADDRSTRLEN);
-    inet_ntop(AF_INET, (struct sockaddr_in *)&ip->daddr, dst_addr_st, INET_ADDRSTRLEN);
-    ip_to_print = (unsigned char *)ip;
-    printf("IP Hdr Dump:\n");
-    for (int i = 0; i < sizeof(*ip); i ++)
-    {
-        printf("%02x%s", ip_to_print[i], (i & 1 ? " " : ""));
-    }
-    printf("\n");
-    printf("Vr HL TOS  Len   ID Flg  off TTL Pro  cks      Src\tDst\tData\n");
-    //https://en.wikipedia.org/wiki/IPv4#Flags => on conervse les trois premiers bits les plus significatifs.
-    uint32_t fl = ntohs(ip->frag_off) >> 13;
-    // https://en.wikipedia.org/wiki/IPv4#Fragment%20offset => les 13 bits de l'offset donc
-    uint32_t off = ntohs(ip->frag_off) & 0x1fff;
-    // on utilise ntohs pour être sûr que la lecture des données se fait dans l'ordre de l'hôte (little endian ou big endian). Les réseaux utilisent toujours le big endian.
-    printf(" %1x  %1x  %02x  %04x %04x   %1x %04x  %02x  %02x %04x %s  %s ", \
-    ip->version, ip->ihl, ip->tos, ntohs(ip->tot_len), ntohs(ip->id), fl, off, ip->ttl, ip->protocol, ntohs(ip->check), src_addr_st, dst_addr_st);
-    printf("\n");
-}
-
-
 void read_recv_buffer(char *recv_buf, int len, double time_spent)
 {
     struct iphdr *ip;
-    int iphdr_len;
     struct icmphdr *icmp;
-
-    
+    int iphdr_len;
     char ip_addr[INET_ADDRSTRLEN];
 
     ip = (struct iphdr *)recv_buf;
@@ -234,11 +201,8 @@ void read_recv_buffer(char *recv_buf, int len, double time_spent)
     icmp = (struct icmphdr *)(recv_buf + iphdr_len);/*struct icmp*/
     len -= iphdr_len;/*taille de notre paquet reçu - taille de l'en-tête ip*/
     inet_ntop(AF_INET, (struct sockaddr_in *)&ip->saddr, ip_addr, INET_ADDRSTRLEN);/*convertir l'adresse ip numérique en représentation x.x.x.x*/
-    
-    if (len < ping.ping_datalen)
-    {
+    if (len < (int)ping.ping_datalen)
         fprintf(stderr, "packet too short (%d bytes) from %s\n", len, ip_addr);
-    }
     else if (icmp->type == ICMP_ECHOREPLY && icmp->un.echo.id == ping.ping_pckt.un.echo.id )
     {
         int checksum_of_icmp = icmp->checksum;
@@ -254,11 +218,15 @@ void read_recv_buffer(char *recv_buf, int len, double time_spent)
         stats->squared_of_round_trip += time_spent * time_spent;
         ping.packet_received++;
     }
-    else if (icmp->type == ICMP_TIME_EXCEEDED)
-    {
-        printf("%d bytes from %s (%s): Time to live exceeded\n", len, ip_addr, ip_addr);
+    else
+    {     
+        print_icmp_control_message(icmp->type, icmp->code, len, ip_addr);
         if (verbose_opt)
-            print_ip_icmp_headers(icmp);
+        {
+            struct iphdr *ipp = (struct iphdr *)((unsigned char *)icmp + sizeof(struct icmphdr));
+            struct icmphdr *icmpp = (struct icmphdr *)((unsigned char *)ipp + sizeof(struct iphdr));
+            print_ip_icmp_headers(ipp, icmpp);
+        }
     }
 }
 
@@ -285,7 +253,7 @@ void print_intro()
 {
     printf("PING %s (%s): %d data bytes", ping.destination_host_name, ping.destination_ip_addr, DATALEN);
     if (verbose_opt)
-        printf(", id %#x = %d", ping.ping_pckt.un.echo.id, ping.ping_pckt.un.echo.id);
+        printf(", id 0x%04x = %d", ping.ping_pckt.un.echo.id, ping.ping_pckt.un.echo.id);
     printf("\n");
 }
 
@@ -307,4 +275,158 @@ void print_stats()
     //écart type == racine carrée de la variance, qui est la moyenne des carrés des valeurs - le carré de la moyenne des valeurs
     double stddev = mysqrt(stats->squared_of_round_trip / ping.packet_received - av * av);
     printf("round-trip min/avg/max/stddev = %.3f/%.3f/%.3f/%.3f ms\n", stats->min_round_trip, av, stats->max_round_trip, stddev);
+}
+
+/*https://en.wikipedia.org/wiki/Internet_Control_Message_Protocol#Control%20messages*/
+void print_icmp_control_message(int type, int code, int len, char *ip_addr)
+{
+    printf("%d bytes from %s (%s): ", len, ip_addr, ip_addr);
+    switch (type)
+    {
+        case ICMP_ECHOREPLY:
+            printf("Echo Reply");
+            break;
+        case ICMP_DEST_UNREACH:
+            switch (code)
+            {
+                case ICMP_NET_UNREACH:
+                    printf("Destination Net Unreachable\n");
+                    break;
+                case ICMP_HOST_UNREACH:
+                    printf("Destination Host Unreachable\n");
+                    break;
+                case ICMP_PROT_UNREACH:
+                    printf("Destination Protocol Unreachable\n");
+                    break;
+                case ICMP_PORT_UNREACH:
+                    printf("Destination Port Unreachable\n");
+                    break;
+                case ICMP_FRAG_NEEDED:
+                    printf("Fragmentation needed and DF set\n");
+                    break;
+                case ICMP_SR_FAILED:
+                    printf("Source Route Failed\n");
+                    break;
+                case ICMP_NET_UNKNOWN:
+                    printf("Network Unknown\n");
+                    break;
+                case ICMP_HOST_UNKNOWN:
+                    printf("Host Unknown\n");
+                    break;
+                case ICMP_HOST_ISOLATED:
+                    printf("Host Isolated\n");
+                    break;
+                case ICMP_NET_ANO:
+                    printf("Network Administratively Prohibited\n");
+                    break;
+                case ICMP_HOST_ANO:
+                    printf("Host Administratively Prohibited\n");
+                    break;
+                case ICMP_NET_UNR_TOS:
+                    printf("Destination Network Unreachable At This TOS\n");
+                    break;
+                case ICMP_PKT_FILTERED:
+                    printf("Packet Filtered\n");
+                    break;
+                case ICMP_PREC_VIOLATION:
+                    printf("Precedence Violation\n");
+                    break;
+                case ICMP_PREC_CUTOFF:
+                    printf("Precedence Cutoff\n");
+                    break;
+                default:
+                    printf("Unknow code for type ICMP_DEST_UNREACH\n");
+            }
+            break;
+        case ICMP_SOURCE_QUENCH:
+            printf("Source Quench");
+            break;
+        case ICMP_REDIRECT:
+            switch (code)
+            {
+                case ICMP_REDIR_NET:
+                    printf("Redirect Network\n");
+                    break;
+                case ICMP_REDIR_HOST:
+                    printf("Redirect Host\n");
+                    break;
+                case ICMP_REDIR_NETTOS:
+                    printf("Redirect Type of Service and Network\n");
+                    break;
+                case ICMP_REDIR_HOSTTOS:
+                    printf("Redirect Type of Service and Host\n");
+                    break;
+                default:
+                    printf("Unknow code for ICMP_REDIRECT\n");
+                    break;
+            }
+            break;
+        case ICMP_ECHO:
+            printf("Echo Request");
+            break;
+        case ICMP_TIME_EXCEEDED:
+            switch (code)
+            {
+                case ICMP_EXC_TTL:
+                    printf("Time to live exceeded\n");
+                    break;
+                case ICMP_EXC_FRAGTIME:
+                    printf("Frag reassembly time exceeded");
+                    break;
+                default:
+                    printf("Unknown code for ICMP_TIME_EXCEEDED\n");
+            }
+            break;
+        case ICMP_PARAMETERPROB:
+            printf("Parameter Problem");
+            break;
+        case ICMP_TIMESTAMP:
+            printf("Timestamp");
+            break;
+        case ICMP_TIMESTAMPREPLY:
+            printf("Timestamp Reply");
+            break;
+        case ICMP_INFO_REQUEST:
+            printf("Information Request");
+            break;
+        case ICMP_INFO_REPLY:
+            printf("Information Reply");
+            break;
+        case ICMP_ADDRESS:
+            printf("Address Mask Request");
+            break;
+        case ICMP_ADDRESSREPLY:
+            printf("Address Mask Reply");
+            break;
+        default:
+            printf("Unknown type.\n");
+            break;
+    }
+}
+
+void print_ip_icmp_headers(struct iphdr *ip, struct icmphdr *icmp)
+{
+    unsigned char *ip_to_print = (unsigned char *)ip;
+    char src_addr_st[INET_ADDRSTRLEN];
+    char dst_addr_st[INET_ADDRSTRLEN];
+
+    inet_ntop(AF_INET, (struct sockaddr_in *)&ip->saddr, src_addr_st, INET_ADDRSTRLEN);
+    inet_ntop(AF_INET, (struct sockaddr_in *)&ip->daddr, dst_addr_st, INET_ADDRSTRLEN);
+    ip_to_print = (unsigned char *)ip;
+    printf("IP Hdr Dump:\n");
+    for (size_t i = 0; i < sizeof(*ip); i ++)
+    {
+        printf("%02x%s", ip_to_print[i], (i & 1 ? " " : ""));
+    }
+    printf("\n");
+    printf("Vr HL TOS  Len   ID Flg  off TTL Pro  cks      Src\tDst\tData\n");
+    //https://en.wikipedia.org/wiki/IPv4#Flags => on conervse les trois premiers bits les plus significatifs.
+    uint32_t fl = ntohs(ip->frag_off) >> 13;
+    // https://en.wikipedia.org/wiki/IPv4#Fragment%20offset => les 13 bits de l'offset donc
+    uint32_t off = ntohs(ip->frag_off) & 0x1fff;
+    printf(" %1x  %1x  %02x %04x %04x", ip->version, ip->ihl, ip->tos, ntohs(ip->tot_len), ntohs(ip->id));
+    printf ("   %1x %04x  %02x  %02x %04x",fl, off, ip->ttl, ip->protocol, ntohs(ip->check));
+    printf (" %s  %s \n", src_addr_st, dst_addr_st);
+    printf ("ICMP: type %d, code %d, size %d, id 0x%04x, seq 0x%04x\n", \
+    icmp->type, icmp->code, ntohs (ip->tot_len) - ip->ihl * 4, icmp->un.echo.id, icmp->un.echo.sequence);
 }

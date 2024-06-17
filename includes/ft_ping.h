@@ -55,6 +55,8 @@ void init_stats();
 void send_ping();
 void receive_ping();
 void read_recv_buffer(char *recv_buf, int len, double time_spent);
+void print_ip_icmp_headers(struct iphdr *ip, struct icmphdr *icmp);
+void print_icmp_control_message(int type, int code, int len, char *ip_addr);
 void print_intro();
 void print_outro();
 void print_stats();

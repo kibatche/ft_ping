@@ -108,6 +108,5 @@ double mysqrt(double nb)
     while (myabs(guess * guess - nb) > tol) {
         guess = (guess + nb / guess) / 2.0;
     }
-    printf("Me : %.3f Inetutils : %.3f\n", guess, nsqrt(nb, 0.0005));
     return guess;
 }

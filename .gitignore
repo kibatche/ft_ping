@@ -1,4 +1,7 @@
-ping/
+ping
+ft_ping
+obj/
+.vscode/
 .gdb_history
 a.out
 # Prerequisites

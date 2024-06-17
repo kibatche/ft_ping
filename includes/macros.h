@@ -9,6 +9,8 @@
 # define RECV_TIMEOUT 1
 # define DATALEN 56//64 - sizeof(icmp_hdr)
 
+
+
 # define MIN(x, y) (x < y ? x : y)
 # define MAX(x, y) (x > y ? x : y)
 #endif
