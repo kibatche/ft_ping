@@ -1,7 +1,8 @@
 CC = gcc
+RM = rm -rf
 
 SRC = ft_ping.c utils.c
-CFLAGS = -Wall -Wextra -Werror
+CFLAGS = -Wall -Wextra -Werror -g
 NAME = ft_ping
 
 SRCDIR = ./src
@@ -15,19 +16,16 @@ all: $(NAME)
 $(NAME): $(OBJS)
 	$(CC) $(CFLAGS) $(OBJS) -o $(NAME) -Iincludes
 
-
 $(OBJDIR)/%.o: $(SRCDIR)/%.c
 	@mkdir -p $(OBJDIR)
-	$(CC) -o $@ -c $< $(CFLAGS) -Iincludes
-
--include $(DEPS)
+	$(CC) $(CFLAGS) -o $@ -c $< $(CFLAGS) -Iincludes
 
 clean:
-	rm -rf $(OBJDIR)
+	$(RM) $(OBJDIR)
 
 fclean: clean
-	rm $(NAME)
+	$(RM) $(NAME)
 
 re: fclean all
 
-.PHONY: clean re all fclean ft_ping
+.PHONY: clean re all fclean
