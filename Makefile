@@ -2,7 +2,7 @@ CC = gcc
 RM = rm -rf
 
 SRC = ft_ping.c utils.c
-CFLAGS = -Wall -Wextra -Werror -g
+CFLAGS = -Wall -Wextra -Werror
 NAME = ft_ping
 
 SRCDIR = ./src

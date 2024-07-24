@@ -3,9 +3,9 @@
 /*volatile empêche l'opti du compilo, ref : https://www.gnu.org/software/c-intro-and-ref/manual/html_node/volatile.html */
 volatile sig_atomic_t cont;/*pour arrêter la boucle*/
 
-int sleep_sec;
-
+// the ;qin ping struct
 ping_infos ping;
+// the ping's stats struct (for the end)
 ping_stats *stats;
 char *hostname;
 char buffer_to_send[4096];
@@ -28,7 +28,14 @@ static struct argp_option options[] = {
   {0}
 };
 
-
+/**
+ * @brief This function is from the libc and helps to parse arguments from command line
+ * 
+ * @param key
+ * @param arg 
+ * @param state 
+ * @return error_t 
+ */
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
     switch(key)
@@ -58,6 +65,12 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 
 static struct argp argp = { options, parse_opt, args_doc, doc, 0, 0, 0 };
 
+/**
+ * @brief This function will free the existing structs if they exist and quit with the right error message
+ * 
+ * @param errstr 
+ * @param err 
+ */
 void errors(const char *errstr, int err)
 {
     free_arg(hostname);
@@ -73,6 +86,13 @@ void sig_handler(int sig)
     cont = 0;
 }
 
+/**
+ * @brief This function will check if the host passed is an ip address.
+ * If not it will check if the host is passed via an hostname (ie google.com)
+ * If nothing works, it will return an error and exits the program.
+ * 
+ * @param ping 
+ */
 void check_host(ping_infos *ping)
 {
     struct hostent *host_entity = NULL;
@@ -108,6 +128,11 @@ void check_host(ping_infos *ping)
         strcpy(ping->destination_ip_addr, hostname);
 }
 
+/**
+ * @brief This function will init the main info of the ping struct before attempting any ICMP message.
+ * 
+ * @param ping 
+ */
 void init_ping(ping_infos *ping)
 {
     struct timeval timeout;      
@@ -138,6 +163,10 @@ void init_ping(ping_infos *ping)
     ping->packet_received = 0;
 }
 
+/**
+ * @brief This function inits the stats.
+ * 
+ */
 void init_stats()
 {
     stats = malloc(sizeof(ping_stats));
@@ -149,6 +178,10 @@ void init_stats()
     stats->sum_of_round_trip = 0.0;
 }
 
+/**
+ * @brief This function inits the available arguments for this program.
+ * 
+ */
 void init_args()
 {
     hostname = NULL;
@@ -159,9 +192,14 @@ void init_args()
     cont = 1;
 }
 
+/**
+ * @brief This function calculates the ICMP checksum, inits a time (to calculate the time spent to send and receive a message.)
+ * and sends the ICMP ECHO message.
+ * 
+ */
 void send_ping()
 {
-    //nécessaire de remttre à 0 pour recalculer
+    //nécessaire de remttre à 0 pour recalculer le checksum
     ping.ping_pckt.checksum = 0;
     ping.ping_pckt.un.echo.sequence = sequence;
     ping.ping_pckt.checksum = checksum((unsigned short *)&ping.ping_pckt, sizeof(ping.ping_pckt));
@@ -173,6 +211,10 @@ void send_ping()
     sequence++;
 }
 
+/**
+ * @brief This function will receive a message from the target host or from the broadcast address (in case of error, ie a short TTL value.)
+ * 
+ */
 void receive_ping()
 {
     socklen_t len_ping_addr = sizeof(ping.ping_address);
@@ -189,6 +231,16 @@ void receive_ping()
     nanosleep(&tm_to_sleep, NULL);
 }
 
+/**
+ * @brief This function will parse the buffer from the host or the broadcast address and read the information from it.
+ * If the type of the message is ICMP ECHO REPLY it means that everything worked, and it will print the stats info this specific pcket.
+ * Else, it will print an error message according to the type of the ICMP response. Then it will print, if verbose option choosed, the information about the dropped packet
+ * (or malformed packet).
+ * 
+ * @param recv_buf 
+ * @param len 
+ * @param time_spent 
+ */
 void read_recv_buffer(char *recv_buf, int len, double time_spent)
 {
     struct iphdr *ip;
@@ -249,6 +301,10 @@ int main(int ac, char **av)
     return 0;
 }
 
+/**
+ * @brief intro printing before sending any ICMP message to host
+ * 
+ */
 void print_intro()
 {
     printf("PING %s (%s): %d data bytes", ping.destination_host_name, ping.destination_ip_addr, DATALEN);
@@ -257,6 +313,10 @@ void print_intro()
     printf("\n");
 }
 
+/**
+ * @brief print outro after a sigint
+ * 
+ */
 void print_outro()
 {   
     printf("--- %s ping statistics ---\n", ping.destination_host_name);
@@ -277,7 +337,10 @@ void print_stats()
     printf("round-trip min/avg/max/stddev = %.3f/%.3f/%.3f/%.3f ms\n", stats->min_round_trip, av, stats->max_round_trip, stddev);
 }
 
-/*https://en.wikipedia.org/wiki/Internet_Control_Message_Protocol#Control%20messages*/
+/**
+ * @brief Print the error according to the type of control message.
+ * https://en.wikipedia.org/wiki/Internet_Control_Message_Protocol#Control%20messages
+ */
 void print_icmp_control_message(int type, int code, int len, char *ip_addr)
 {
     printf("%d bytes from %s (%s): ", len, ip_addr, ip_addr);
@@ -335,7 +398,7 @@ void print_icmp_control_message(int type, int code, int len, char *ip_addr)
                     printf("Precedence Cutoff\n");
                     break;
                 default:
-                    printf("Unknow code for type ICMP_DEST_UNREACH\n");
+                    printf("Unknown code for type ICMP_DEST_UNREACH\n");
             }
             break;
         case ICMP_SOURCE_QUENCH:
@@ -404,6 +467,12 @@ void print_icmp_control_message(int type, int code, int len, char *ip_addr)
     }
 }
 
+/**
+ * @brief Print the icmp header and the ip header in case of an error and the verbose option sets to true.
+ * 
+ * @param ip 
+ * @param icmp 
+ */
 void print_ip_icmp_headers(struct iphdr *ip, struct icmphdr *icmp)
 {
     unsigned char *ip_to_print = (unsigned char *)ip;
