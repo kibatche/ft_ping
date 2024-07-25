@@ -1,5 +1,5 @@
 ping
-ft_ping
+./ft_ping
 obj/
 .vscode/
 .gdb_history
@@ -56,3 +56,4 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+ft_ping
